@@ -7,6 +7,8 @@ import socket
 import requests
 from IP2Location import IP2Location
 import webbrowser
+from datetime import datetime
+
 
 
 from PyQt5.QtWidgets import (
@@ -113,6 +115,9 @@ class NetworkCaptureApp(QMainWindow):
         self.stop_flag = False  # Flag to signal the capture thread to stop
         self.paused = False  # Flag to indicate whether capture is paused
 
+         # Initialize frame_number_counter
+        self.frame_number_counter = 0
+
         self.setWindowTitle("Network Capture Tool")
         self.setGeometry(100, 100, 900, 600)
  # Set the font to Spotify Circular
@@ -183,6 +188,7 @@ class NetworkCaptureApp(QMainWindow):
         self.stop_capture_action = None
         self.pause_capture_action = None
         self.resume_capture_action = None
+        self.capture_stats_action = None
 
 
         # Menu Bar
@@ -265,6 +271,11 @@ class NetworkCaptureApp(QMainWindow):
         self.resume_capture_action.triggered.connect(self.resume_capture)
         capture_menu.addAction(self.resume_capture_action)
 
+        # Capturing Statistics Action
+        self.capture_stats_action = QAction("&Capturing Statistics", self)
+        self.capture_stats_action.triggered.connect(self.show_capture_statistics)
+        capture_menu.addAction(self.capture_stats_action)
+
         # Initial state: Start Capture enabled, Stop Capture disabled
         if self.start_capture_action is not None:
             self.start_capture_action.setEnabled(True)
@@ -277,6 +288,10 @@ class NetworkCaptureApp(QMainWindow):
 
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
+        # Add Help Action
+        help_action = QAction("&Help", self)
+        help_action.triggered.connect(self.open_help_link)
+        help_menu.addAction(help_action)
 
         # Toolbar
         toolbar = QFrame()
@@ -292,6 +307,12 @@ class NetworkCaptureApp(QMainWindow):
         self.stop_button.clicked.connect(self.stop_capture)
         self.stop_button.setEnabled(False)
         toolbar_layout.addWidget(self.stop_button)
+
+        # Add Refresh button
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_packet_list)
+        toolbar_layout.addWidget(self.refresh_button)
+
 
         spacer_item = QSpacerItem(10, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
         toolbar_layout.addItem(spacer_item)
@@ -399,12 +420,15 @@ class NetworkCaptureApp(QMainWindow):
                         self.packet_list.takeTopLevelItem(index)
                         del self.captured_packets[index]
 
+    def open_help_link(self):
+        url = "https://arjun364.github.io/GEOSNIFFX-HELP-PAGE/"
+        webbrowser.open_new_tab(url)
     def clear_all_packets(self):
         # Clears the packet display
         self.packet_list.clear()
         # Assuming self.captured_packets is your internal storage
         self.captured_packets.clear()
-        print("All packets cleared")
+
 
     def pause_capture(self):
         if not self.paused:
@@ -418,6 +442,28 @@ class NetworkCaptureApp(QMainWindow):
             self.paused = False
             self.start_capture()
             QMessageBox.information(self, "Capture Resumed", "Packet capture has been resumed.")
+
+    def show_capture_statistics(self):
+        total_packets = len(self.captured_packets)
+        capture_duration = self.calculate_capture_duration()
+        average_packets_per_second = total_packets / capture_duration if capture_duration > 0 else 0
+
+        # Constructing the message
+        message = f"Total packets captured: {total_packets}\n"
+        message += f"Capture duration: {capture_duration} seconds\n"
+        message += f"Average packets per second: {average_packets_per_second:.2f}"
+
+        QMessageBox.information(self, "Capturing Statistics", message)
+
+    def calculate_capture_duration(self):
+        # Calculate the duration of the capture in seconds
+        if self.captured_packets:
+            start_time = self.captured_packets[0].time  # Assume these are already float timestamps
+            end_time = self.captured_packets[-1].time
+            duration = end_time - start_time  # This will already be a float representing seconds
+            return duration  # Directly return the duration in seconds
+        else:
+            return 0
 
     def copy_packet_details(self):
         selected_items = self.packet_list.selectedItems()
@@ -467,6 +513,17 @@ class NetworkCaptureApp(QMainWindow):
         # Set the stop flag to signal the capture thread to stop
         self.stop_flag = True
 
+    def refresh_packet_list(self):
+        # Clear the current packet list
+        self.packet_list.clear()
+
+        # Reset the frame number counter
+        self.frame_number_counter = 0
+
+        # Display the captured packets again
+        for pkt in self.captured_packets:
+            self.display_captured_packets(pkt)
+
     def packet_capture_thread(self):
         # Implement the packet capturing logic here
         # For demonstration purposes, let's print captured packets
@@ -483,7 +540,9 @@ class NetworkCaptureApp(QMainWindow):
 
     def display_captured_packets(self, pkt):
         try:
-            frame_number = len(self.captured_packets)
+            self.frame_number_counter += 1
+
+            frame_number = self.frame_number_counter
             source_ip = ""
             dest_ip = ""
             source_port = ""
@@ -570,10 +629,85 @@ class NetworkCaptureApp(QMainWindow):
     def apply_display_filter(self):
         display_filter_expression = self.display_filter_input.text()
         if display_filter_expression:
-            # Apply display filter logic here
-            pass
+            # Clear the current packet list
+            self.packet_list.clear()
+
+            # Apply the display filter logic
+            filtered_packets = [pkt for pkt in self.captured_packets if self.match_display_filter(pkt, display_filter_expression)]
+
+            # Display the filtered packets
+            for pkt in filtered_packets:
+                self.display_captured_packets(pkt)
         else:
             QMessageBox.warning(self, "Warning", "Please provide a display filter expression.")
+
+
+    def match_display_filter(self, pkt, display_filter_expression):
+        # Check if the display filter expression matches the packet attributes
+        if display_filter_expression.lower() == 'tcp':
+            # Check if the packet is TCP
+            return TCP in pkt
+        elif display_filter_expression.lower() == 'udp':
+            # Check if the packet is UDP
+            return UDP in pkt
+        elif display_filter_expression.lower() == 'icmp':
+            # Check if the packet is ICMP
+            return ICMP in pkt
+        elif display_filter_expression.lower() == 'dns':
+            # Check if the packet is DNS
+            return DNS in pkt
+        elif 'source_ip' in display_filter_expression.lower():
+            # Extract the source IP address from the display filter expression
+            src_ip = display_filter_expression.lower().split('=')[1].strip()
+            # Check if the packet's source IP matches the specified source IP
+            return IP in pkt and pkt[IP].src == src_ip
+        elif 'destination_ip' in display_filter_expression.lower():
+            # Extract the destination IP address from the display filter expression
+            dst_ip = display_filter_expression.lower().split('=')[1].strip()
+        #    Check if the packet's destination IP matches the specified destination IP
+            return IP in pkt and pkt[IP].dst == dst_ip
+        elif 'source_port' in display_filter_expression.lower():
+            # Extract the source port from the display filter expression
+            src_port = int(display_filter_expression.lower().split('=')[1].strip())
+            # Check if the packet's source port matches the specified source port
+            return TCP in pkt and pkt[TCP].sport == src_port
+        elif 'destination_port' in display_filter_expression.lower():
+            # Extract the destination port from the display filter expression
+            dst_port = int(display_filter_expression.lower().split('=')[1].strip())
+            # Check if the packet's destination port matches the specified destination port
+            return TCP in pkt and pkt[TCP].dport == dst_port
+        elif 'length' in display_filter_expression.lower():
+            # Extract the packet length from the display filter expression
+            length = int(display_filter_expression.lower().split('=')[1].strip())
+            # Check if the packet's length matches the specified length
+            return len(pkt) == length
+        elif 'destination_ip' in display_filter_expression.lower() and 'destination_port' in display_filter_expression.lower():
+            # Extract destination IP and port from the display filter expression
+            dst_ip = display_filter_expression.lower().split('=')[1].split('and')[0].strip()
+            dst_port = int(display_filter_expression.lower().split('=')[2].strip())
+            # Check if the packet's destination IP and port match the specified values
+            return IP in pkt and pkt[IP].dst == dst_ip and TCP in pkt and pkt[TCP].dport == dst_port
+        elif 'source_ip' in display_filter_expression.lower() and 'source_port' in display_filter_expression.lower():
+            # Extract source IP and port from the display filter expression
+            src_ip = display_filter_expression.lower().split('=')[1].split('and')[0].strip()
+            src_port = int(display_filter_expression.lower().split('=')[2].strip())
+            # Check if the packet's source IP and port match the specified values
+            return IP in pkt and pkt[IP].src == src_ip and TCP in pkt and pkt[TCP].sport == src_port
+        elif 'source_ip' in display_filter_expression.lower() and 'destination_port' in display_filter_expression.lower():
+            # Extract source IP and destination port from the display filter expression
+            src_ip = display_filter_expression.lower().split('=')[1].split('and')[0].strip()
+            dst_port = int(display_filter_expression.lower().split('=')[2].strip())
+            # Check if the packet's source IP and destination port match the specified values
+            return IP in pkt and pkt[IP].src == src_ip and TCP in pkt and pkt[TCP].dport == dst_port
+        elif 'destination_ip' in display_filter_expression.lower() and 'source_port' in display_filter_expression.lower():
+            # Extract destination IP and source port from the display filter expression
+            dst_ip = display_filter_expression.lower().split('=')[1].split('and')[0].strip()
+            src_port = int(display_filter_expression.lower().split('=')[2].strip())
+            # Check if the packet's destination IP and source port match the specified values
+            return IP in pkt and pkt[IP].dst == dst_ip and TCP in pkt and pkt[TCP].sport == src_port
+        else:
+            # Implement other matching criteria as needed
+            return False
 
     def enable_analyze_button(self):
         if  self.packet_list.selectedItems():
@@ -590,6 +724,8 @@ class NetworkCaptureApp(QMainWindow):
         dialog.exec_()
 
     def new_file(self):
+        # Reset the frame number counter to 1
+        self.frame_number_counter = 0
         # Implement creating a new file
         # Clear captured packets list
         self.captured_packets = []
@@ -711,6 +847,7 @@ class NetworkCaptureApp(QMainWindow):
         url = "https://www.google.com/maps/d/u/0/?hl=en"
         webbrowser.open_new_tab(url)
 
+
 class PacketAnalyzerDialog(QDialog):
     def __init__(self, packet_info):
         super().__init__()
@@ -718,7 +855,7 @@ class PacketAnalyzerDialog(QDialog):
         self.setGeometry(300, 300, 600, 400)  # Set initial size
 
         # Set the background image
-        self.set_background_image("/home/diablo/geosniffx/dbipcity/analyzer.png")  # Provide the path to your image
+        self.set_background_image("/home/diablo/geosniffx/Preview.png")  # Provide the path to your image
 
         layout = QVBoxLayout()
 
@@ -730,7 +867,7 @@ class PacketAnalyzerDialog(QDialog):
         labels = ["Time:", "Frame Number:", "Source IP:", "Destination IP:",
                   "Source Port:", "Destination Port:", "Protocol:", "Length:", "Source MAC:", "Destination MAC:","info :"]
 
-        print("Packet Info:", packet_info)  # Print packet_info for debugging
+
 
         for row, label_text in enumerate(labels):
             label = QLabel(label_text)
@@ -812,12 +949,6 @@ if __name__ == "__main__":
     welcome_window = WelcomeWindow()
     welcome_window.show()
     sys.exit(app.exec_())
-
-
-
-
-
-
 
 
 
