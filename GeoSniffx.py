@@ -286,6 +286,15 @@ class NetworkCaptureApp(QMainWindow):
         if self.resume_capture_action is not None:
             self.resume_capture_action.setEnabled(True)
 
+        # Add a submenu for "Unauthorized Packet"
+        unauthorized_packet_menu = capture_menu.addMenu("Unauthorized Packet")
+
+        # Add actions or functionalities related to unauthorized packets under this submenu
+
+        unauthorized_packet_action = QAction("Capture Unauthorized Packets", self)
+        unauthorized_packet_action.triggered.connect(self.capture_unauthorized_packets)
+        unauthorized_packet_menu.addAction(unauthorized_packet_action)
+
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
         # Add Help Action
@@ -428,6 +437,43 @@ class NetworkCaptureApp(QMainWindow):
         self.packet_list.clear()
         # Assuming self.captured_packets is your internal storage
         self.captured_packets.clear()
+
+    def get_firehol_ip_lists(self):
+        # Download FireHOL IP Lists and parse them to extract IP addresses
+        firehol_url = "https://iplists.firehol.org/files/firehol_level1.netset"
+        try:
+            response = requests.get(firehol_url)
+            response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
+            ip_list = response.text.split("\n")
+            # Remove empty lines and comments
+            ip_list = [ip.strip() for ip in ip_list if ip.strip() and not ip.strip().startswith("#")]
+            return ip_list
+        except requests.RequestException as e:
+            # Handle request exceptions (e.g., network errors)
+            print(f"Error downloading FireHOL IP Lists: {e}")
+            return []
+
+    def capture_unauthorized_packets(self):
+        unauthorized_packets = []
+        unauthorized_ips = self.get_firehol_ip_lists()  # Get FireHOL IP Lists
+
+        if not unauthorized_ips:
+            # Handle case where IP list retrieval fails
+            QMessageBox.warning(self, "Unauthorized Packets", "Failed to retrieve unauthorized IP list.")
+            return
+
+        # Check each captured packet for unauthorized IPs
+        for pkt in self.captured_packets:
+            if IP in pkt:
+                if pkt[IP].src in unauthorized_ips or pkt[IP].dst in unauthorized_ips:
+                    unauthorized_packets.append(pkt)
+
+        if unauthorized_packets:
+            # Display unauthorized packets
+            self.display_unauthorized_packets(unauthorized_packets)
+        else:
+            # Show message if no unauthorized packets found
+            QMessageBox.information(self, "Unauthorized Packets", "No unauthorized packets found.")
 
 
     def pause_capture(self):
@@ -949,7 +995,6 @@ if __name__ == "__main__":
     welcome_window = WelcomeWindow()
     welcome_window.show()
     sys.exit(app.exec_())
-
 
 
 
